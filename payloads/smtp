@@ -1,0 +1,9 @@
+HELO gmail.com
+MAIL FROM: foo@gmail.com
+RCPT TO: victim@victim-domain.com
+DATA
+Subject: AAAAAAAAAAAAA
+BBBBBBBBBBBBBBBBBBB
+.
+QUIT
+
