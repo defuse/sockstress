@@ -55,6 +55,7 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
+#include <ifaddrs.h>
 
 #include <pthread.h>
 
@@ -112,7 +113,8 @@ struct packetStats_t {
 
 void *process_incoming(void *ptr);
 void *send_syns(void *ptr);
-int get_iface_ip(struct sockaddr_in *ip, char *iface);
+int get_iface_ip(struct sockaddr *addr,socklen_t addrlen,
+			char *iface,int domain);
 void calc_tcp_checksum(unsigned char *packet, unsigned long packet_length, struct in_addr src, struct in_addr dst);
 void send_ack(unsigned char *packet);
 void *print_status(void *ptr);
@@ -218,11 +220,16 @@ void processArgs(int argc, char **argv)
     int iface_index = 1;
 
     // If they put the interface before the ip:port, swap the indexes. 
-    if(get_iface_ip(&globalArgs.iface_addr, remArgv[iface_index]) == 0)
+    if(get_iface_ip((struct sockaddr*)&globalArgs.iface_addr,
+					sizeof(globalArgs.iface_addr),
+					remArgv[iface_index],
+					AF_INET))
     {
         ip_index = 1;
         iface_index = 0;
-        if(get_iface_ip(&globalArgs.iface_addr, remArgv[iface_index]) == 0)
+        if(get_iface_ip((struct sockaddr*)&globalArgs.iface_addr,
+						sizeof(globalArgs.iface_addr),
+						remArgv[iface_index],AF_INET))
             printUsage("Invalid interface.");
     }
 
@@ -516,21 +523,38 @@ void calc_tcp_checksum(unsigned char *packet, unsigned long packet_length, struc
     tcp->checksum = htons(~checksum);
 }
 
-int get_iface_ip(struct sockaddr_in *ip, char *iface)
+int get_iface_ip(struct sockaddr *addr,socklen_t addrlen,
+			char *iface,int domain)
 {
-    int fd;
-    struct ifreq ifr;
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
-    ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
-    int ret = ioctl(fd, SIOCGIFADDR, &ifr);
-    if(ret != 0)
-    {
-        return 0;
+    if (addr == NULL || iface == NULL
+        || (domain != AF_INET && domain != AF_INET6)) {
+        /* check add and iface not null and domain is AF_INET or AF_INET6 */
+        return -1;
     }
-    close(fd);
-    ip->sin_family = AF_INET;
-    ip->sin_addr = ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr;
-    return 1; 
+
+    struct ifaddrs *ifap = NULL;
+    int ret = -1;
+
+    if (getifaddrs(&ifap)) {
+        return ret;
+    }
+
+    struct ifaddrs *ifptr = ifap;
+    while (ifptr) {
+        if (strcmp(iface, ifptr->ifa_name) == 0 &&
+            ifptr->ifa_addr != NULL &&
+            ifptr->ifa_addr->sa_family == domain) {
+            /* return the first interface address that matches */
+            addr->sa_family = domain;
+            memcpy(addr, ifptr->ifa_addr, addrlen);
+            ret = 0;
+            break;
+        }
+        ifptr = ifptr->ifa_next;
+    }
+
+    freeifaddrs(ifap);
+
+    return ret;
 }
 
